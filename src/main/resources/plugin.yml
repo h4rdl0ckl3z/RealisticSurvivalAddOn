@@ -9,3 +9,5 @@ commands:
     description: Reloads the RealisticSurvivalAddOn configuration.
     aliases: [rsaor]
     permission: realisticSurvivalAddOn.reload
+  home:
+    description: Home.

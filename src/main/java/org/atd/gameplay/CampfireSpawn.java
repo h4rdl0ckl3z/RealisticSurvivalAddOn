@@ -5,6 +5,9 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -16,7 +19,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import java.sql.*;
 import java.util.UUID;
 
-public class CampfireSpawn implements Listener {
+public class CampfireSpawn implements Listener, CommandExecutor {
 
     private final RealisticSurvivalAddOn plugin;
     private final String databaseURL;
@@ -25,6 +28,7 @@ public class CampfireSpawn implements Listener {
         this.plugin = plugin;
         this.databaseURL = databaseURL;
         createTable();
+        plugin.getCommand("home").setExecutor(this);
     }
 
     private void createTable() {
@@ -166,8 +170,45 @@ public class CampfireSpawn implements Listener {
     }
 
     private Location findSafeLocation(Location location) {
+        if (location == null || location.getWorld() == null) {
+            plugin.getLogger().warning("Invalid location provided to findSafeLocation: " + location);
+            return null; // Or handle the error appropriately
+        }
         Location safeLocation = location.clone();
-        safeLocation.setY(location.getWorld().getHighestBlockYAt(location));
+        World world = safeLocation.getWorld();
+        int highestY = world.getHighestBlockYAt(safeLocation);
+        safeLocation.setY(highestY);
+
+        //Check for obstructions above the campfire
+        for(int y = highestY; y < world.getMaxHeight(); y++){
+            Block block = world.getBlockAt(safeLocation.getBlockX(), y, safeLocation.getBlockZ());
+            if(!block.getType().isAir()){
+                safeLocation.setY(y+1);
+                break;
+            }
+        }
         return safeLocation;
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!(sender instanceof Player)) {
+            sender.sendMessage("Only players can use this command.");
+            return true;
+        }
+
+        Player player = (Player) sender;
+        if (command.getName().equalsIgnoreCase("home")) {
+            Location homeLocation = getCampfireLocation(player.getUniqueId());
+            if (homeLocation != null) {
+                Location safeLocation = findSafeLocation(homeLocation);
+                player.teleport(safeLocation);
+                player.sendMessage("You have been teleported to your campfire home.");
+            } else {
+                player.sendMessage("You have not set a campfire home yet.");
+            }
+            return true;
+        }
+        return false;
     }
 }
