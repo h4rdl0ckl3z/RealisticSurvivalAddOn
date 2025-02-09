@@ -22,21 +22,26 @@ public final class RealisticSurvivalAddOn extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        // Plugin startup logic
         getLogger().info("RealisticSurvivalAddOn has been enabled!");
 
-        // Save the default config if it doesn't exist
-        this.saveDefaultConfig();
+        this.saveDefaultConfig(); // Save default config if it doesn't exist
+        loadConfig();            // Load the configuration
 
-        // Load the configuration
-        loadConfig();
+        // Database setup:  Better to do this *after* config load in case you need config values
+        String databaseURL = "jdbc:sqlite:plugins/RealisticSurvivalAddOn/database.db"; // Or get from config
+        try {
+            Class.forName("org.sqlite.JDBC"); // Important: Load the JDBC driver
+            CampfireSpawn campfireSpawnListener = new CampfireSpawn(this, databaseURL);
+            getServer().getPluginManager().registerEvents(campfireSpawnListener, this);
+        } catch (ClassNotFoundException e) {
+            getLogger().severe("SQLite JDBC driver not found! Disabling CampfireSpawn feature.");
+            // Consider disabling the plugin or parts of it if the DB is critical.
+            return; // Stop further initialization related to CampfireSpawn.
+        }
 
-        // Register the event listener
-        getServer().getPluginManager().registerEvents(new FarmProtection(this), this);
-        getServer().getPluginManager().registerEvents(new CampfireSpawn(this), this);
+        getServer().getPluginManager().registerEvents(new FarmProtection(this), this);  // Other listeners
 
-        // Register the command executor
-        this.getCommand("rsaoreload").setExecutor(this);
+        this.getCommand("rsaoreload").setExecutor(this); // Command registration
     }
 
     @Override
