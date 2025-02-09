@@ -19,25 +19,25 @@ import java.util.UUID;
 public class CampfireSpawn implements Listener {
 
     private final RealisticSurvivalAddOn plugin;
-    private final String databaseURL; // Path to your SQLite database file
+    private final String databaseURL;
 
     public CampfireSpawn(RealisticSurvivalAddOn plugin, String databaseURL) {
         this.plugin = plugin;
         this.databaseURL = databaseURL;
-        createTable(); // Initialize the database table
+        createTable();
     }
 
     private void createTable() {
+        String sql = "CREATE TABLE IF NOT EXISTS campfire_spawns (" +
+                "player_uuid TEXT PRIMARY KEY, " +
+                "world TEXT, " +
+                "x INTEGER, " +
+                "y INTEGER, " +
+                "z INTEGER)";
+
         try (Connection connection = DriverManager.getConnection(databaseURL);
              Statement statement = connection.createStatement()) {
-
-            statement.execute("CREATE TABLE IF NOT EXISTS campfire_spawns (" +
-                    "player_uuid TEXT PRIMARY KEY, " +
-                    "world TEXT, " +
-                    "x INTEGER, " +
-                    "y INTEGER, " +
-                    "z INTEGER)");
-
+            statement.execute(sql);
         } catch (SQLException e) {
             plugin.getLogger().severe("Error creating database table: " + e.getMessage());
         }
@@ -45,47 +45,52 @@ public class CampfireSpawn implements Listener {
 
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
-        Player player = event.getPlayer();
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+
         Block block = event.getClickedBlock();
-        Action action = event.getAction();
-        World world = player.getWorld(); // Directly get world from player
+        if (block == null || block.getType() != Material.CAMPFIRE) return;
 
-        if (block != null && action.isRightClick() && block.getType() == Material.CAMPFIRE) { // No need to check world again, it's implied by the block
-            Location campfireLocation = block.getLocation();
+        Player player = event.getPlayer();
+        Location campfireLocation = block.getLocation();
 
-            // Check if the world is the target world.  This is CRUCIAL!
-            if (!campfireLocation.getWorld().getName().equals("world")) {
-                return; // Exit if not in the "world" world
-            }
+        if (!campfireLocation.getWorld().getName().equals("world")) {
+            player.sendMessage("You can only set a respawn point in the 'world' world.");
+            return;
+        }
 
-            if (!isCampfireOwned(campfireLocation)) {
-                try (Connection connection = DriverManager.getConnection(databaseURL);
-                     PreparedStatement statement = connection.prepareStatement(
-                             "INSERT INTO campfire_spawns (player_uuid, world, x, y, z) VALUES (?, ?, ?, ?, ?)")) {
+        if (isCampfireOwned(campfireLocation)) {
+            player.sendMessage("This campfire is already claimed!");
+            return;
+        }
 
-                    statement.setString(1, player.getUniqueId().toString());
-                    statement.setString(2, campfireLocation.getWorld().getName()); // Use the actual world name
-                    statement.setInt(3, campfireLocation.getBlockX());
-                    statement.setInt(4, campfireLocation.getBlockY());
-                    statement.setInt(5, campfireLocation.getBlockZ());
-                    statement.executeUpdate();
+        setCampfireSpawn(player, campfireLocation);
+    }
 
-                    player.sendMessage("Your respawn point has been set at this campfire!");
-                } catch (SQLException e) {
-                    plugin.getLogger().severe("Error saving campfire spawn to database: " + e.getMessage());
-                    player.sendMessage("Error setting respawn point. Please try again.");
-                    e.printStackTrace(); // Print the full stack trace for debugging
-                }
-            } else {
-                player.sendMessage("This campfire is already claimed!");
-            }
+    private void setCampfireSpawn(Player player, Location location) {
+        String sql = "INSERT INTO campfire_spawns (player_uuid, world, x, y, z) VALUES (?, ?, ?, ?, ?)";
+
+        try (Connection connection = DriverManager.getConnection(databaseURL);
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+
+            statement.setString(1, player.getUniqueId().toString());
+            statement.setString(2, location.getWorld().getName());
+            statement.setInt(3, location.getBlockX());
+            statement.setInt(4, location.getBlockY());
+            statement.setInt(5, location.getBlockZ());
+            statement.executeUpdate();
+
+            player.sendMessage("Your respawn point has been set at this campfire!");
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Error saving campfire spawn to database: " + e.getMessage());
+            player.sendMessage("Error setting respawn point. Please try again.");
         }
     }
 
     private boolean isCampfireOwned(Location location) {
+        String sql = "SELECT 1 FROM campfire_spawns WHERE world = ? AND x = ? AND y = ? AND z = ?";
+
         try (Connection connection = DriverManager.getConnection(databaseURL);
-             PreparedStatement statement = connection.prepareStatement(
-                     "SELECT 1 FROM campfire_spawns WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+             PreparedStatement statement = connection.prepareStatement(sql)) {
 
             statement.setString(1, location.getWorld().getName());
             statement.setInt(2, location.getBlockX());
@@ -93,12 +98,11 @@ public class CampfireSpawn implements Listener {
             statement.setInt(4, location.getBlockZ());
 
             try (ResultSet resultSet = statement.executeQuery()) {
-                return resultSet.next(); // Returns true if a row is found, false otherwise
+                return resultSet.next();
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Error checking campfire ownership: " + e.getMessage());
-            e.printStackTrace(); // Important for debugging!
-            return false; // Assume it's owned to prevent errors from letting players claim it
+            return true; // Assume it's owned to prevent errors from letting players claim it
         }
     }
 
@@ -115,9 +119,10 @@ public class CampfireSpawn implements Listener {
     }
 
     private Location getCampfireLocation(UUID playerUUID) {
+        String sql = "SELECT world, x, y, z FROM campfire_spawns WHERE player_uuid = ?";
+
         try (Connection connection = DriverManager.getConnection(databaseURL);
-             PreparedStatement statement = connection.prepareStatement(
-                     "SELECT world, x, y, z FROM campfire_spawns WHERE player_uuid = ?")) {
+             PreparedStatement statement = connection.prepareStatement(sql)) {
 
             statement.setString(1, playerUUID.toString());
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -126,7 +131,7 @@ public class CampfireSpawn implements Listener {
                     int x = resultSet.getInt("x");
                     int y = resultSet.getInt("y");
                     int z = resultSet.getInt("z");
-                    return new Location(plugin.getServer().getWorld(worldName), x + 0.5, y, z + 0.5); // Center the location
+                    return new Location(plugin.getServer().getWorld(worldName), x + 0.5, y, z + 0.5);
                 }
             }
         } catch (SQLException e) {
@@ -138,26 +143,25 @@ public class CampfireSpawn implements Listener {
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
+        if (block.getType() != Material.CAMPFIRE) return;
 
-        if (block.getType() == Material.CAMPFIRE) {
-            Location brokenCampfireLocation = block.getLocation();
-            try (Connection connection = DriverManager.getConnection(databaseURL);
-                 PreparedStatement statement = connection.prepareStatement(
-                         "DELETE FROM campfire_spawns WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-                statement.setString(1, brokenCampfireLocation.getWorld().getName());
-                statement.setInt(2, brokenCampfireLocation.getBlockX());
-                statement.setInt(3, brokenCampfireLocation.getBlockY());
-                statement.setInt(4, brokenCampfireLocation.getBlockZ());
-                statement.executeUpdate();
+        Location brokenCampfireLocation = block.getLocation();
+        String sql = "DELETE FROM campfire_spawns WHERE world = ? AND x = ? AND y = ? AND z = ?";
 
+        try (Connection connection = DriverManager.getConnection(databaseURL);
+             PreparedStatement statement = connection.prepareStatement(sql)) {
 
-                // Notify the player who lost their spawn point (optional)
-                // (This requires another database query to get the player UUID)
-                // ... (Implementation for notification)
+            statement.setString(1, brokenCampfireLocation.getWorld().getName());
+            statement.setInt(2, brokenCampfireLocation.getBlockX());
+            statement.setInt(3, brokenCampfireLocation.getBlockY());
+            statement.setInt(4, brokenCampfireLocation.getBlockZ());
+            statement.executeUpdate();
 
-            } catch (SQLException e) {
-                plugin.getLogger().severe("Error deleting campfire spawn from database: " + e.getMessage());
-            }
+            // Optional: Notify the player who lost their spawn point
+            // (Implementation for notification can be added here)
+
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Error deleting campfire spawn from database: " + e.getMessage());
         }
     }
 
