@@ -3,6 +3,7 @@ package org.atd.gameplay;
 import org.atd.RealisticSurvivalAddOn;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -42,15 +43,20 @@ public class CampfireSpawn implements Listener {
         }
     }
 
-
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         Player player = event.getPlayer();
         Block block = event.getClickedBlock();
         Action action = event.getAction();
+        World world = player.getWorld(); // Directly get world from player
 
-        if (block != null && action.isRightClick() && block.getType() == Material.CAMPFIRE) {
+        if (block != null && action.isRightClick() && block.getType() == Material.CAMPFIRE) { // No need to check world again, it's implied by the block
             Location campfireLocation = block.getLocation();
+
+            // Check if the world is the target world.  This is CRUCIAL!
+            if (!campfireLocation.getWorld().getName().equals("world")) {
+                return; // Exit if not in the "world" world
+            }
 
             if (!isCampfireOwned(campfireLocation)) {
                 try (Connection connection = DriverManager.getConnection(databaseURL);
@@ -58,7 +64,7 @@ public class CampfireSpawn implements Listener {
                              "INSERT INTO campfire_spawns (player_uuid, world, x, y, z) VALUES (?, ?, ?, ?, ?)")) {
 
                     statement.setString(1, player.getUniqueId().toString());
-                    statement.setString(2, campfireLocation.getWorld().getName());
+                    statement.setString(2, campfireLocation.getWorld().getName()); // Use the actual world name
                     statement.setInt(3, campfireLocation.getBlockX());
                     statement.setInt(4, campfireLocation.getBlockY());
                     statement.setInt(5, campfireLocation.getBlockZ());
@@ -68,6 +74,7 @@ public class CampfireSpawn implements Listener {
                 } catch (SQLException e) {
                     plugin.getLogger().severe("Error saving campfire spawn to database: " + e.getMessage());
                     player.sendMessage("Error setting respawn point. Please try again.");
+                    e.printStackTrace(); // Print the full stack trace for debugging
                 }
             } else {
                 player.sendMessage("This campfire is already claimed!");
@@ -78,18 +85,20 @@ public class CampfireSpawn implements Listener {
     private boolean isCampfireOwned(Location location) {
         try (Connection connection = DriverManager.getConnection(databaseURL);
              PreparedStatement statement = connection.prepareStatement(
-                     "SELECT player_uuid FROM campfire_spawns WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+                     "SELECT 1 FROM campfire_spawns WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+
             statement.setString(1, location.getWorld().getName());
             statement.setInt(2, location.getBlockX());
             statement.setInt(3, location.getBlockY());
             statement.setInt(4, location.getBlockZ());
 
             try (ResultSet resultSet = statement.executeQuery()) {
-                return resultSet.next(); // Returns true if a row is found (campfire owned)
+                return resultSet.next(); // Returns true if a row is found, false otherwise
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Error checking campfire ownership: " + e.getMessage());
-            return false; // Assume not owned in case of error
+            e.printStackTrace(); // Important for debugging!
+            return false; // Assume it's owned to prevent errors from letting players claim it
         }
     }
 
@@ -151,8 +160,6 @@ public class CampfireSpawn implements Listener {
             }
         }
     }
-
-
 
     private Location findSafeLocation(Location location) {
         Location safeLocation = location.clone();
