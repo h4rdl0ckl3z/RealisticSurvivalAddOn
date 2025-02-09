@@ -1,0 +1,11 @@
+name: RealisticSurvivalAddOn
+version: '1.0-SNAPSHOT'
+main: org.atd.RealisticSurvivalAddOn
+api-version: '1.21'
+#depend: [RealisticSurvival]
+softdepend: [RealisticSurvival]
+commands:
+  rsaoreload:
+    description: Reloads the RealisticSurvivalAddOn configuration.
+    aliases: [rsaor]
+    permission: realisticSurvivalAddOn.reload
